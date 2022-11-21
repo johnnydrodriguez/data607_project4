@@ -1,0 +1,278 @@
+---
+title: "Classification Of Spam & Ham"
+author: "Johnny Rodriguez"
+date: "2022-11-21"
+output:
+  html_document:
+    toc: true
+    toc_float: false
+    toc_depth: 4
+    number_sections: false
+    highlight: pygments
+    theme: cerulean
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# #Packages for this analysis
+# install.packages("caTools")
+# install.packages("readtext")
+# install.packages("tm")
+# install.packages("randomForest")
+
+
+#Load libraries to read and prepare data
+library(readtext)
+library(tidyverse)
+
+```
+
+<br/>
+
+### Introduction - Spam & Ham Classification using Random Forest
+This analysis creates a classification for spam and ham using Random Forest.  The code was based on a code referenced in https://kharshit.github.io/blog/2017/08/25/email-spam-filtering-text-analysis-in-r.  
+
+After the initial analysis, I was interested in testing whether random forest accuracy could be improved by providing the model more data.  The first run was completed using one set of spam and one set of ham messages.  The second run uses all of the  spam and ham message available in this data set.  The spam / ham data came from https://spamassassin.apache.org/old/publiccorpus/
+
+<br/>
+
+### Stepping through the data clean up and classification build
+
+#### 1. Spam & Ham Data Prep
+
+```{r  echo = TRUE, warning = FALSE, message = FALSE}
+
+#One randomly selected SPAM & HAM dataset from https://spamassassin.apache.org/old/publiccorpus/
+spamdata <- readtext::readtext("/Users/johnnyrodriguez/spamham/spam", encoding='UTF-8')
+hamdata <- readtext::readtext("/Users/johnnyrodriguez/spamham/ham", encoding='UTF-8')
+
+#Label spam records
+spamdata <- spamdata %>% 
+  add_column(label = "spam")
+
+#Label ham records
+hamdata <- hamdata %>% 
+  add_column(label = "ham")
+
+#Combines the spam & ham data into a single table
+emails <- rbind(hamdata, spamdata)
+glimpse(emails)
+
+```
+
+#### 2. Write and Read the Combined Spam & Ham data set
+
+```{r}
+#For reproducibility, the email data was written to CSV and copied to github.  The CSV is reloaded for the analysis.
+write.csv(emails, "emails.csv", row.names=FALSE)
+
+#Read the CSV from github
+emails <- read.csv("https://raw.githubusercontent.com/johnnydrodriguez/data607_project4/main/emails.csv", na.strings=c("","NA"))
+
+```
+
+#### 3. Check the count of spam & ham records
+
+```{r}
+
+#checking the count of records for spam & ham
+emails %>%
+  group_by(label) %>% 
+  count(label)
+
+```
+
+#### 4. Clean email text
+
+```{r echo = TRUE, warning = FALSE, message = FALSE}
+
+#Clean up the email text using the textminer  library
+library(tm)
+
+corpus = VCorpus(VectorSource(emails$text)) #Vectorizes corpus
+corpus = tm_map(corpus, content_transformer(tolower)) # converts to lowercase
+corpus = tm_map(corpus, PlainTextDocument) #makes all plain text
+corpus = tm_map(corpus, removePunctuation) #removes punctuation
+corpus = tm_map(corpus, removeWords, stopwords("en")) #removes stopwords
+corpus = tm_map(corpus, stemDocument) #stems words
+
+```
+
+#### 5. Prepare the data for the model
+
+```{r}
+
+#Creates a Document Term Matrix from the corpus
+dtm = DocumentTermMatrix(corpus)
+
+#Removes terms that appear less than 5% of the time in document term matrix
+sparsedtm =  removeSparseTerms(dtm, 0.95)
+sparsedtm
+
+#converts sparse document term matrix to a dataframe
+emailsSparse = as.data.frame(as.matrix(sparsedtm))
+
+#makes the variable names (the sparse terms) the column names
+colnames(emailsSparse) = make.names(colnames(emailsSparse))
+
+#converts the spam variable into a factor used in the model
+emailsSparse$spam = as.factor(emailsSparse$spam)
+
+str(emailsSparse)
+
+```
+
+#### 6. Create Training & Testing Data Set
+
+```{r echo = TRUE, warning = FALSE, message = FALSE}
+
+#splits the data into a test and training data
+library(caTools)
+
+set.seed(123)
+spl = sample.split(emailsSparse$spam, 0.7)
+train = subset(emailsSparse, spl == TRUE)
+test = subset(emailsSparse, spl == FALSE)
+
+```
+
+#### 7. Random Forest to Train Model
+
+```{r echo = TRUE, warning = FALSE, message = FALSE}
+
+#Use Random Forest to train the model and predict the label using the training data
+library(randomForest)
+
+set.seed(123)
+spamRF = randomForest(spam~., data=train)
+
+```
+
+#### 8. Predict & Check the Accuracy Against the Training Data
+
+```{r}
+
+#calculate the accuracy of the RF model using the training data
+predTrainRF = predict(spamRF, type="prob")[,2] 
+table(train$spam, predTrainRF > 0.5)
+
+##Accuracy Calculation for Training Data
+(2537+8)/nrow(train)
+
+```
+
+#### 9. Predict & Check Accuracy Against Test Data
+```{r}
+predTestRF = predict(spamRF, newdata=test, type="prob")[,2] 
+table(test$spam, predTestRF > 0.5)
+
+##Accuracy Calculation for Test Data
+(1087+4)/nrow(test)
+
+```
+
+### Repeat the process for ALL Spam & Ham Records
+
+```{r echo = TRUE, warning = FALSE, message = FALSE}
+
+
+# All SPAM & HAM datasets from https://spamassassin.apache.org/old/publiccorpus/
+spamdata1 <- readtext::readtext("/Users/johnnyrodriguez/spamham/spam1", encoding='UTF-8')
+hamdata1 <- readtext::readtext("/Users/johnnyrodriguez/spamham/ham1", encoding='UTF-8')
+
+#Label spam records
+spamdata1 <- spamdata1 %>% 
+  add_column(label = "spam")
+
+#Label ham records
+hamdata1 <- hamdata1 %>% 
+  add_column(label = "ham")
+
+#Combines the spam & ham data into a single table
+emails1 <- rbind(hamdata1, spamdata1)
+
+#For reproducibility, the email data was written to CSV and copied to github. 
+#Due to the size, the file was zipped. The zip was read into analysis and location at https://github.com/johnnydrodriguez/data607_project4/blob/main/emails1.csv.zip
+write.csv(emails1, "emails1.csv", row.names=FALSE)
+
+
+#checking the count of records for spam & ham
+emails1 %>%
+  group_by(label) %>% 
+  count(label)
+
+#Clean up the email text using the textminer library
+library(tm)
+corpus1 = VCorpus(VectorSource(emails1$text)) #Vectorizes corpus
+corpus1 = tm_map(corpus1, content_transformer(tolower)) # converts to lowercase
+corpus1 = tm_map(corpus1, PlainTextDocument) #makes all plain text
+corpus1 = tm_map(corpus1, removePunctuation) #removes punctuation
+corpus1 = tm_map(corpus1, removeWords, stopwords("en")) #removes stopwords
+corpus1 = tm_map(corpus1, stemDocument) #stems words
+
+#Creates a Document Term Matrix from the corpus
+dtm1 = DocumentTermMatrix(corpus1)
+
+#Removes terms that appear less than 5% of the time in document term matrix
+sparsedtm1 =  removeSparseTerms(dtm1, 0.95)
+sparsedtm1
+
+#converts sparse document term matrix to a dataframe
+emailsSparse1 = as.data.frame(as.matrix(sparsedtm1))
+
+#makes the variable names (the sparse terms) the column names
+colnames(emailsSparse1) = make.names(colnames(emailsSparse1))
+
+#converts the spam variable into a factor used in the model
+emailsSparse1$spam = as.factor(emailsSparse1$spam)
+str(emailsSparse1)
+
+#splits the data into a test and training data
+library(caTools)
+set.seed(123)
+spl1 = sample.split(emailsSparse1$spam, 0.7)
+train1 = subset(emailsSparse1, spl1 == TRUE)
+test1 = subset(emailsSparse1, spl1 == FALSE)
+
+
+#Use Random Forest to train the model and predict the label using the training data
+library(randomForest)
+set.seed(123)
+spamRF1 = randomForest(spam~., data=train1)
+
+#calculate the accuracy of the RF model using the training data
+predTrainRF1 = predict(spamRF1, type="prob")[,2] 
+table(train1$spam, predTrainRF1 > 0.5)
+
+##Accuracy Calculation for Training Data
+(5909+122)/nrow(train1)
+
+#calculate the accuracy of the model using the testing data
+predTestRF1 = predict(spamRF1, newdata=test1, type="prob")[,2] 
+table(test1$spam, predTestRF1 > 0.5)
+
+##Accuracy Calculation for Test Data
+(2533+65)/nrow(test1)
+
+
+```
+
+### Conclusion
+Random forest accuracy did **not** improve for spam / ham classification when additional data was provided to the model (increase in n).  Alternatives to improve the model would be necessary beyond the current range.
+
+For the smaller data set, accuracy against the training data set was 92.07%.  Accuracy against the test data was 92.23%
+
+----
+Type | Count
+ham | 2551
+spam | 1396 
+----
+
+For the larger data set, accuracy against the training data set was 92.14%/  Accuracy against the test data was 92.65%
+
+---
+Type | Count
+ham | 6951
+spam | 2398
+---
